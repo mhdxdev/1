@@ -1,7 +1,3 @@
-// ============================================================
-// TelegramContext — Unified Reactive State Engine
-// ============================================================
-
 import React, {
   createContext,
   useContext,
@@ -27,20 +23,9 @@ import type {
   SettingsTab,
   AdminTab,
 } from '../types';
-import {
-  SEED_USERS,
-  SEED_CHATS,
-  SEED_MESSAGES,
-  SEED_MEMES,
-  SEED_SESSIONS,
-  SEED_LOGS,
-} from '../data/seed';
 import { telegramEmitter, EVENTS } from '../utils/eventEmitter';
 import { getStorageItem, setStorageItem } from '../hooks/useStorage';
 
-// ------------------------------------------------------------------
-// Initial State
-// ------------------------------------------------------------------
 const defaultSettings: AppSettings = {
   theme: 'dark',
   language: 'en',
@@ -56,17 +41,17 @@ const defaultSettings: AppSettings = {
     phoneVisibility: 'contacts',
     lastSeenVisibility: 'everybody',
   },
-  sessions: SEED_SESSIONS,
+  sessions: [],
 };
 
 function buildInitialState(): TelegramState {
   const savedUser = getStorageItem<User | null>('tg_current_user', null);
   const savedSettings = getStorageItem<AppSettings>('tg_settings', defaultSettings);
-  const savedMemes = getStorageItem<CustomMeme[]>('tg_memes', SEED_MEMES);
-  const savedChats = getStorageItem<Chat[]>('tg_chats', SEED_CHATS);
-  const savedMessages = getStorageItem<Record<string, Message[]>>('tg_messages', SEED_MESSAGES);
-  const savedUsers = getStorageItem<User[]>('tg_users', SEED_USERS);
-  const savedLogs = getStorageItem<SystemLog[]>('tg_logs', SEED_LOGS);
+  const savedMemes = getStorageItem<CustomMeme[]>('tg_memes', []);
+  const savedChats = getStorageItem<Chat[]>('tg_chats', []);
+  const savedMessages = getStorageItem<Record<string, Message[]>>('tg_messages', {});
+  const savedUsers = getStorageItem<User[]>('tg_users', []);
+  const savedLogs = getStorageItem<SystemLog[]>('tg_logs', []);
 
   return {
     authStep: savedUser ? 'done' : 'landing',
@@ -98,12 +83,8 @@ function buildInitialState(): TelegramState {
   };
 }
 
-// ------------------------------------------------------------------
-// Reducer
-// ------------------------------------------------------------------
 function telegramReducer(state: TelegramState, action: TelegramAction): TelegramState {
   switch (action.type) {
-    // ---- Auth ----
     case 'SET_AUTH_STEP':
       return { ...state, authStep: action.payload };
 
@@ -134,7 +115,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
         activeChat: null,
       };
 
-    // ---- Users ----
     case 'UPDATE_USER': {
       const updatedUsers = state.users.map((u) =>
         u.id === action.payload.id ? { ...u, ...action.payload } : u
@@ -161,16 +141,11 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
           : state.currentUser;
       if (updatedCurrent) setStorageItem('tg_current_user', updatedCurrent);
       telegramEmitter.emit(EVENTS.PREMIUM_TOGGLED, { userId: action.payload.userId });
-      const newLog = makeLog(
-        `[LOG]: Premium status toggled for user ID ${action.payload.userId}`
-      );
-      addLogToStorage(newLog);
       return {
         ...state,
         users: updatedUsers,
         currentUser: updatedCurrent,
         analytics: { ...state.analytics, premiumSubscriptions: premCount },
-        systemLogs: [newLog, ...state.systemLogs],
       };
     }
 
@@ -179,15 +154,7 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
         u.id === action.payload.userId ? { ...u, isBanned: action.payload.isBanned } : u
       );
       setStorageItem('tg_users', updatedUsers);
-      const newLog = makeLog(
-        `[LOG]: User ID ${action.payload.userId} ${action.payload.isBanned ? 'banned' : 'unbanned'}`
-      );
-      addLogToStorage(newLog);
-      return {
-        ...state,
-        users: updatedUsers,
-        systemLogs: [newLog, ...state.systemLogs],
-      };
+      return { ...state, users: updatedUsers };
     }
 
     case 'BLOCK_USER': {
@@ -216,7 +183,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       return { ...state, currentUser: updatedUser, users: updatedUsers };
     }
 
-    // ---- Chats ----
     case 'SET_ACTIVE_CHAT':
       return { ...state, activeChat: action.payload };
 
@@ -226,10 +192,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       const newMessages = { ...state.messages, [action.payload.id]: [] };
       setStorageItem('tg_messages', newMessages);
       telegramEmitter.emit(EVENTS.CHAT_CREATED, action.payload);
-      const newLog = makeLog(
-        `[LOG]: ${action.payload.type === 'channel' ? 'Channel' : 'Group'} "${action.payload.name}" created`
-      );
-      addLogToStorage(newLog);
       return {
         ...state,
         chats: newChats,
@@ -243,7 +205,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
               ? state.analytics.activeChannels + 1
               : state.analytics.activeChannels,
         },
-        systemLogs: [newLog, ...state.systemLogs],
       };
     }
 
@@ -270,7 +231,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       return { ...state, chats: updatedChats };
     }
 
-    // ---- Messages ----
     case 'SEND_MESSAGE': {
       const { chatId } = action.payload;
       const existing = state.messages[chatId] ?? [];
@@ -282,10 +242,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       setStorageItem('tg_messages', newMessages);
       setStorageItem('tg_chats', newChats);
       telegramEmitter.emit(EVENTS.MESSAGE_SENT, action.payload);
-      const newLog = makeLog(
-        `[LOG]: User @${state.currentUser?.username ?? 'unknown'} sent a message in chat ${chatId}`
-      );
-      addLogToStorage(newLog);
       return {
         ...state,
         messages: newMessages,
@@ -294,7 +250,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
           ...state.analytics,
           messagesToday: state.analytics.messagesToday + 1,
         },
-        systemLogs: [newLog, ...state.systemLogs],
       };
     }
 
@@ -308,7 +263,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       return { ...state, messages: newMessages };
     }
 
-    // ---- Memes ----
     case 'CREATE_MEME': {
       const newMemes = [action.payload, ...state.customMemes];
       setStorageItem('tg_memes', newMemes);
@@ -322,7 +276,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       return { ...state, customMemes: newMemes };
     }
 
-    // ---- UI ----
     case 'SET_SIDEBAR_TAB':
       return { ...state, activeSidebarTab: action.payload, activeChat: null };
 
@@ -351,7 +304,6 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
     case 'TOGGLE_ADMIN_PANEL':
       return { ...state, showAdminPanel: action.payload };
 
-    // ---- Settings ----
     case 'UPDATE_SETTINGS': {
       const newSettings = { ...state.appSettings, ...action.payload };
       setStorageItem('tg_settings', newSettings);
@@ -382,16 +334,12 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
       const newSessions = state.appSettings.sessions.filter((s) => s.isCurrentSession);
       const newSettings = { ...state.appSettings, sessions: newSessions };
       setStorageItem('tg_settings', newSettings);
-      const newLog = makeLog('[LOG]: All other sessions terminated');
-      addLogToStorage(newLog);
       return {
         ...state,
         appSettings: newSettings,
-        systemLogs: [newLog, ...state.systemLogs],
       };
     }
 
-    // ---- Logs ----
     case 'ADD_LOG': {
       const newLogs = [action.payload, ...state.systemLogs.slice(0, 199)];
       setStorageItem('tg_logs', newLogs);
@@ -406,30 +354,9 @@ function telegramReducer(state: TelegramState, action: TelegramAction): Telegram
   }
 }
 
-// ------------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------------
-function makeLog(message: string, level: SystemLog['level'] = 'info'): SystemLog {
-  return {
-    id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    timestamp: Date.now(),
-    level,
-    message,
-  };
-}
-
-function addLogToStorage(log: SystemLog): void {
-  const stored = getStorageItem<SystemLog[]>('tg_logs', []);
-  setStorageItem('tg_logs', [log, ...stored].slice(0, 200));
-}
-
-// ------------------------------------------------------------------
-// Context
-// ------------------------------------------------------------------
 interface TelegramContextValue {
   state: TelegramState;
   dispatch: React.Dispatch<TelegramAction>;
-  // Convenience actions
   sendMessage: (
     chatId: string,
     text: string,
@@ -450,91 +377,26 @@ interface TelegramContextValue {
 
 const TelegramContext = createContext<TelegramContextValue | null>(null);
 
-// ------------------------------------------------------------------
-// Provider
-// ------------------------------------------------------------------
 export function TelegramProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(telegramReducer, undefined, buildInitialState);
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Simulate message read receipts
-  const simulateRead = useCallback((chatId: string, messageId: string) => {
-    setTimeout(() => {
-      dispatch({
-        type: 'UPDATE_MESSAGE_STATUS',
-        payload: { chatId, messageId, status: 'delivered' },
-      });
-      setTimeout(() => {
-        dispatch({
-          type: 'UPDATE_MESSAGE_STATUS',
-          payload: { chatId, messageId, status: 'read' },
-        });
-      }, 1500);
-    }, 800);
-  }, []);
-
-  // Simulate auto-replies in direct chats
   useEffect(() => {
     const unsub = telegramEmitter.on<Message>(EVENTS.MESSAGE_SENT, (msg) => {
       const currentState = stateRef.current;
       const chat = currentState.chats.find((c) => c.id === msg.chatId);
       if (!chat || chat.type !== 'direct') return;
+
       const otherUserId = chat.memberIds.find((id) => id !== currentState.currentUser?.id);
       if (!otherUserId) return;
+
       const otherUser = currentState.users.find((u) => u.id === otherUserId);
       if (!otherUser || !otherUser.isOnline) return;
-
-      const replies = [
-        'Got it! 👍',
-        'That sounds great!',
-        'Let me check and get back to you 🔍',
-        'Haha, nice one! 😄',
-        'Absolutely! Will do.',
-        '🔥🔥🔥',
-        'On it! ✅',
-        'Interesting... tell me more',
-      ];
-      const reply = replies[Math.floor(Math.random() * replies.length)];
-
-      setTimeout(() => {
-        const replyMsg: Message = {
-          id: `msg_${Date.now()}_auto`,
-          chatId: msg.chatId,
-          senderId: otherUserId,
-          text: reply,
-          inlineMeme: null,
-          attachments: [],
-          status: 'sent',
-          timestamp: Date.now(),
-          isDeleted: false,
-          replyToId: msg.id,
-        };
-        dispatch({ type: 'SEND_MESSAGE', payload: replyMsg });
-      }, 1500 + Math.random() * 2000);
     });
     return unsub;
   }, []);
 
-  // Simulate live log ticker
-  useEffect(() => {
-    const actions = [
-      '[LOG]: Server heartbeat — all systems nominal',
-      '[LOG]: Garbage collection completed',
-      '[LOG]: Message cache flushed',
-      '[LOG]: Analytics snapshot saved',
-      '[LOG]: Background sync completed',
-    ];
-    const interval = setInterval(() => {
-      const msg = actions[Math.floor(Math.random() * actions.length)];
-      dispatch({ type: 'ADD_LOG', payload: makeLog(msg) });
-    }, 12000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ------------------------------------------------------------------
-  // Convenience helpers
-  // ------------------------------------------------------------------
   const sendMessage = useCallback(
     (
       chatId: string,
@@ -557,16 +419,20 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
         replyToId,
       };
       dispatch({ type: 'SEND_MESSAGE', payload: msg });
-      // Transition: sending → sent
       setTimeout(() => {
         dispatch({
           type: 'UPDATE_MESSAGE_STATUS',
           payload: { chatId, messageId: msg.id, status: 'sent' },
         });
-        simulateRead(chatId, msg.id);
+        setTimeout(() => {
+          dispatch({
+            type: 'UPDATE_MESSAGE_STATUS',
+            payload: { chatId, messageId: msg.id, status: 'read' },
+          });
+        }, 1500);
       }, 400);
     },
-    [simulateRead]
+    []
   );
 
   const setActiveChat = useCallback((chat: Chat | null) => {
@@ -623,7 +489,7 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addLog = useCallback((message: string, level: SystemLog['level'] = 'info') => {
-    dispatch({ type: 'ADD_LOG', payload: makeLog(message, level) });
+    dispatch({ type: 'ADD_LOG', payload: { id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, timestamp: Date.now(), level, message } });
   }, []);
 
   const updateChatSettings = useCallback((settings: Partial<ChatSettings>) => {
@@ -636,10 +502,7 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
 
   const updateMessageStatus = useCallback(
     (chatId: string, messageId: string, status: MessageStatus) => {
-      dispatch({
-        type: 'UPDATE_MESSAGE_STATUS',
-        payload: { chatId, messageId, status },
-      });
+      dispatch({ type: 'UPDATE_MESSAGE_STATUS', payload: { chatId, messageId, status } });
     },
     []
   );
@@ -667,9 +530,6 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ------------------------------------------------------------------
-// Hook
-// ------------------------------------------------------------------
 export function useTelegram(): TelegramContextValue {
   const ctx = useContext(TelegramContext);
   if (!ctx) {
@@ -678,7 +538,6 @@ export function useTelegram(): TelegramContextValue {
   return ctx;
 }
 
-// Re-export types for convenience
 export type {
   AuthStep,
   SettingsTab,
